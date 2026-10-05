@@ -1,16 +1,38 @@
 import React from 'react';
 import Editor from '@monaco-editor/react';
+import type * as MonacoTypes from 'monaco-editor';
 import type { ProjectFile } from '../types';
 
 interface EditorPanelProps {
   activeFile: ProjectFile;
   onContentChange: (newContent: string) => void;
+  onRunShortcut?: () => void;
 }
 
 export const EditorPanel: React.FC<EditorPanelProps> = ({
   activeFile,
   onContentChange,
+  onRunShortcut,
 }) => {
+  const runShortcutRef = React.useRef(onRunShortcut);
+  React.useEffect(() => {
+    runShortcutRef.current = onRunShortcut;
+  }, [onRunShortcut]);
+
+  const handleMount = (
+    editor: MonacoTypes.editor.IStandaloneCodeEditor,
+    monaco: typeof MonacoTypes
+  ) => {
+    editor.addAction({
+      id: 'run-current-file',
+      label: 'Run Current File',
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+      run: () => {
+        runShortcutRef.current?.();
+      },
+    });
+  };
+
   return (
     <main className="flex-1 h-full min-w-0 flex flex-col bg-slate-950 overflow-hidden">
       {/* Editor Tab Header */}
@@ -25,6 +47,9 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
           <span className="text-[11px] font-mono text-slate-500 uppercase px-2 py-0.5 rounded bg-slate-800 border border-slate-700/50">
             {activeFile.language}
           </span>
+          <span className="text-[10px] text-slate-600 select-none hidden sm:block">
+            Ctrl+Enter to run
+          </span>
         </div>
       </div>
 
@@ -37,6 +62,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
           value={activeFile.content}
           theme="vs-dark"
           onChange={(val) => onContentChange(val ?? '')}
+          onMount={handleMount}
           options={{
             fontSize: 14,
             fontFamily: "'JetBrains Mono', 'Fira Code', 'Menlo', 'Consolas', monospace",

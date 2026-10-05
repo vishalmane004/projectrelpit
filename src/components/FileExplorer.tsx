@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { ProjectFile } from '../types';
+import { TEMPLATES } from '../lib/templates';
 
 interface FileExplorerProps {
   files: ProjectFile[];
@@ -8,6 +9,7 @@ interface FileExplorerProps {
   onCreateFile: (name: string) => void;
   onRenameFile: (oldName: string, newName: string) => void;
   onDeleteFile: (name: string) => void;
+  onLoadTemplate: (templateIndex: number) => void;
 }
 
 export const FileExplorer: React.FC<FileExplorerProps> = ({
@@ -17,7 +19,9 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
   onCreateFile,
   onRenameFile,
   onDeleteFile,
+  onLoadTemplate,
 }) => {
+  const [templateSelect, setTemplateSelect] = useState<string>('');
   const existingNames = files.map((f) => f.name);
 
   const handleNewFile = () => {
@@ -33,8 +37,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
   const handleRename = (e: React.MouseEvent, oldName: string) => {
     e.stopPropagation();
     const newName = window.prompt('New file name:', oldName)?.trim();
-    if (!newName) return;
-    if (newName === oldName) return;
+    if (!newName || newName === oldName) return;
     if (existingNames.includes(newName)) {
       window.alert(`A file named "${newName}" already exists.`);
       return;
@@ -46,6 +49,14 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
     e.stopPropagation();
     if (!window.confirm(`Delete "${name}"?`)) return;
     onDeleteFile(name);
+  };
+
+  const handleTemplateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const idx = parseInt(e.target.value, 10);
+    setTemplateSelect('');
+    if (isNaN(idx)) return;
+    if (!window.confirm('Replace current files?')) return;
+    onLoadTemplate(idx);
   };
 
   const getFileIcon = (fileName: string) => {
@@ -82,7 +93,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
 
   return (
     <aside className="w-[250px] min-w-[250px] max-w-[250px] h-full bg-slate-900 border-r border-slate-800 flex flex-col select-none">
-      {/* Header */}
+      {/* Files header + New file */}
       <div className="h-10 px-3 border-b border-slate-800 flex items-center justify-between">
         <span className="text-xs font-semibold tracking-wider uppercase text-slate-400">
           Files
@@ -93,12 +104,28 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
           title="New file"
           className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-white hover:bg-slate-700 px-2 py-1 rounded transition-colors"
         >
-          {/* Plus icon */}
           <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
             <path d="M12 5v14M5 12h14" />
           </svg>
           New file
         </button>
+      </div>
+
+      {/* New project dropdown */}
+      <div className="px-3 py-2 border-b border-slate-800 bg-slate-950/40">
+        <select
+          value={templateSelect}
+          onChange={handleTemplateChange}
+          className="w-full text-[11px] bg-slate-800 border border-slate-700 text-slate-300 rounded px-2 py-1.5 cursor-pointer hover:border-slate-600 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-colors appearance-none"
+          style={{ backgroundImage: "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E\")", backgroundRepeat: 'no-repeat', backgroundPosition: 'right 8px center' }}
+        >
+          <option value="">✦ New project…</option>
+          {TEMPLATES.map((tpl, idx) => (
+            <option key={idx} value={idx}>
+              {tpl.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* File list */}
@@ -113,7 +140,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
           return (
             <div
               key={file.name}
-              className={`group flex items-center gap-0 w-full rounded-md transition-colors ${
+              className={`group flex items-center w-full rounded-md transition-colors ${
                 isActive
                   ? 'bg-slate-800 text-white shadow-sm'
                   : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
@@ -131,13 +158,12 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
                 <span className="truncate font-mono text-xs">{file.name}</span>
               </button>
 
-              {/* Rename & Delete — shown on hover or when file is active */}
+              {/* Rename & Delete — shown on hover or when active */}
               <div
                 className={`flex-shrink-0 flex items-center pr-1.5 gap-0.5 transition-opacity ${
                   isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                 }`}
               >
-                {/* Rename */}
                 <button
                   type="button"
                   onClick={(e) => handleRename(e, file.name)}
@@ -149,7 +175,6 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
                     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                   </svg>
                 </button>
-                {/* Delete */}
                 <button
                   type="button"
                   onClick={(e) => handleDelete(e, file.name)}
@@ -173,7 +198,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({
       <div className="p-3 border-t border-slate-800/80 bg-slate-900/60">
         <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span>{files.length} {files.length === 1 ? 'file' : 'files'}</span>
+          <span>{files.length} {files.length === 1 ? 'file' : 'files'} · auto-saved</span>
         </div>
       </div>
     </aside>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { FileExplorer } from './components/FileExplorer';
 import { EditorPanel } from './components/EditorPanel';
 import { OutputPanel } from './components/OutputPanel';
@@ -6,7 +6,11 @@ import { usePyodide } from './hooks/usePyodide';
 import { useJsRunner } from './hooks/useJsRunner';
 import { buildPreviewDocument } from './lib/previewBuilder';
 import { languageFromExtension } from './lib/languageFromExtension';
+import { TEMPLATES } from './lib/templates';
 import type { ProjectFile } from './types';
+
+const STORAGE_KEY_FILES = 'replit_files';
+const STORAGE_KEY_ACTIVE_FILE = 'replit_active_file';
 
 const INITIAL_FILES: ProjectFile[] = [
   {
@@ -32,8 +36,39 @@ const INITIAL_FILES: ProjectFile[] = [
 ];
 
 export default function App() {
-  const [files, setFiles] = useState<ProjectFile[]>(INITIAL_FILES);
-  const [activeFileName, setActiveFileName] = useState<string>('index.js');
+  const [files, setFiles] = useState<ProjectFile[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_FILES);
+      if (saved !== null) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load files from localStorage', e);
+    }
+    return INITIAL_FILES;
+  });
+
+  const [activeFileName, setActiveFileName] = useState<string>(() => {
+    try {
+      const savedFiles = localStorage.getItem(STORAGE_KEY_FILES);
+      const savedActive = localStorage.getItem(STORAGE_KEY_ACTIVE_FILE);
+      if (savedFiles !== null) {
+        const parsed = JSON.parse(savedFiles);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          if (savedActive && parsed.some((f: ProjectFile) => f.name === savedActive)) {
+            return savedActive;
+          }
+          return parsed[0].name;
+        }
+      }
+    } catch {
+      // fallback
+    }
+    return 'index.js';
+  });
   const [logs, setLogs] = useState<string[]>([]);
   const [isRunning, setIsRunning] = useState<boolean>(false);
 
@@ -46,6 +81,25 @@ export default function App() {
 
   const activeFile =
     files.find((f) => f.name === activeFileName) ?? files[0] ?? null;
+
+  // Auto-save files to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY_FILES, JSON.stringify(files));
+    } catch (e) {
+      console.error('Failed to save files to localStorage', e);
+    }
+  }, [files]);
+
+  useEffect(() => {
+    try {
+      if (activeFileName) {
+        localStorage.setItem(STORAGE_KEY_ACTIVE_FILE, activeFileName);
+      }
+    } catch (e) {
+      console.error('Failed to save active file to localStorage', e);
+    }
+  }, [activeFileName]);
 
   // ---------- Preview console bridge ----------
   useEffect(() => {
@@ -102,8 +156,17 @@ export default function App() {
     });
   };
 
+  const handleLoadTemplate = (templateIndex: number) => {
+    const selectedTemplate = TEMPLATES[templateIndex];
+    if (!selectedTemplate) return;
+    setFiles(selectedTemplate.files);
+    setActiveFileName(selectedTemplate.defaultActive);
+    setLogs([]);
+    setPreviewDoc('');
+  };
+
   // ---------- Run ----------
-  const handleRun = async () => {
+  const handleRun = useCallback(async () => {
     if (!activeFile) return;
     setLogs([]);
 
@@ -143,7 +206,24 @@ export default function App() {
       setActiveTab('console');
       setLogs([`Running ${activeFile.name}...`]);
     }
-  };
+  }, [activeFile, files, isPyodideReady, runPython, runJs]);
+
+  const handleRunRef = useRef(handleRun);
+  useEffect(() => {
+    handleRunRef.current = handleRun;
+  }, [handleRun]);
+
+  // Global Ctrl+Enter / Cmd+Enter shortcut
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        handleRunRef.current();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const handleClearLogs = () => setLogs([]);
 
@@ -157,6 +237,7 @@ export default function App() {
         onCreateFile={handleCreateFile}
         onRenameFile={handleRenameFile}
         onDeleteFile={handleDeleteFile}
+        onLoadTemplate={handleLoadTemplate}
       />
 
       {/* Center: Monaco Editor (flex-1) */}
@@ -164,6 +245,7 @@ export default function App() {
         <EditorPanel
           activeFile={activeFile}
           onContentChange={handleContentChange}
+          onRunShortcut={handleRun}
         />
       ) : (
         <main className="flex-1 flex items-center justify-center bg-slate-950 text-slate-600 text-sm select-none">
