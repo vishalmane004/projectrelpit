@@ -5,6 +5,7 @@ import { OutputPanel } from './components/OutputPanel';
 import { usePyodide } from './hooks/usePyodide';
 import { useJsRunner } from './hooks/useJsRunner';
 import { buildPreviewDocument } from './lib/previewBuilder';
+import { languageFromExtension } from './lib/languageFromExtension';
 import type { ProjectFile } from './types';
 
 const INITIAL_FILES: ProjectFile[] = [
@@ -43,8 +44,10 @@ export default function App() {
   const { runPython, isReady: isPyodideReady } = usePyodide();
   const { runJs } = useJsRunner();
 
-  const activeFile = files.find((f) => f.name === activeFileName) || files[0];
+  const activeFile =
+    files.find((f) => f.name === activeFileName) ?? files[0] ?? null;
 
+  // ---------- Preview console bridge ----------
   useEffect(() => {
     const handlePreviewMessage = (event: MessageEvent) => {
       if (event.data && event.data.type === 'PREVIEW_CONSOLE_LOG') {
@@ -55,25 +58,62 @@ export default function App() {
     return () => window.removeEventListener('message', handlePreviewMessage);
   }, []);
 
+  // ---------- Content change ----------
   const handleContentChange = (newContent: string) => {
-    setFiles((prevFiles) =>
-      prevFiles.map((file) =>
+    setFiles((prev) =>
+      prev.map((file) =>
         file.name === activeFileName ? { ...file, content: newContent } : file
       )
     );
   };
 
+  // ---------- File management ----------
+  const handleCreateFile = (name: string) => {
+    const newFile: ProjectFile = {
+      name,
+      language: languageFromExtension(name),
+      content: '',
+    };
+    setFiles((prev) => [...prev, newFile]);
+    setActiveFileName(name);
+  };
+
+  const handleRenameFile = (oldName: string, newName: string) => {
+    setFiles((prev) =>
+      prev.map((file) =>
+        file.name === oldName
+          ? { ...file, name: newName, language: languageFromExtension(newName) }
+          : file
+      )
+    );
+    if (activeFileName === oldName) {
+      setActiveFileName(newName);
+    }
+  };
+
+  const handleDeleteFile = (name: string) => {
+    setFiles((prev) => {
+      const remaining = prev.filter((f) => f.name !== name);
+      if (activeFileName === name) {
+        // Open the first remaining file, or clear selection
+        setActiveFileName(remaining[0]?.name ?? '');
+      }
+      return remaining;
+    });
+  };
+
+  // ---------- Run ----------
   const handleRun = async () => {
-    // Clear the output panel before each run
+    if (!activeFile) return;
     setLogs([]);
 
     const hasIndexHtml = files.some((f) => f.name === 'index.html');
     const isHtmlFile = activeFile.name.endsWith('.html');
     const isWebFileWithHtml =
-      (activeFile.name.endsWith('.css') || activeFile.name.endsWith('.js')) && hasIndexHtml;
+      (activeFile.name.endsWith('.css') || activeFile.name.endsWith('.js')) &&
+      hasIndexHtml;
 
     if (isHtmlFile || isWebFileWithHtml) {
-      // Build preview directly from editor state
       const doc = buildPreviewDocument(files, activeFile.name);
       setPreviewDoc(doc);
       setPreviewKey((k) => k + 1);
@@ -84,44 +124,28 @@ export default function App() {
     if (activeFile.name.endsWith('.py')) {
       setActiveTab('console');
       setIsRunning(true);
-
-      // Show "Loading Python..." the first time Pyodide initializes
       if (!isPyodideReady) {
         setLogs(['Loading Python...']);
       }
-
       await runPython(activeFile.content, {
-        onOutput: (text) => {
-          setLogs((prev) => [...prev, text]);
-        },
-        onError: (errorText) => {
-          setLogs((prev) => [...prev, errorText]);
-        },
-        onStartLoading: () => {
-          setLogs(['Loading Python...']);
-        },
+        onOutput: (text) => setLogs((prev) => [...prev, text]),
+        onError: (errorText) => setLogs((prev) => [...prev, errorText]),
+        onStartLoading: () => setLogs(['Loading Python...']),
       });
-
       setIsRunning(false);
     } else if (activeFile.name.endsWith('.js')) {
       setActiveTab('console');
       runJs(activeFile.content, {
-        onOutput: (text) => {
-          setLogs((prev) => [...prev, text]);
-        },
-        onError: (errorText) => {
-          setLogs((prev) => [...prev, errorText]);
-        },
+        onOutput: (text) => setLogs((prev) => [...prev, text]),
+        onError: (errorText) => setLogs((prev) => [...prev, errorText]),
       });
     } else {
       setActiveTab('console');
-      setLogs([`Running ${activeFileName}...`]);
+      setLogs([`Running ${activeFile.name}...`]);
     }
   };
 
-  const handleClearLogs = () => {
-    setLogs([]);
-  };
+  const handleClearLogs = () => setLogs([]);
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-slate-950 text-slate-100 flex">
@@ -130,18 +154,27 @@ export default function App() {
         files={files}
         activeFileName={activeFileName}
         onSelectFile={setActiveFileName}
+        onCreateFile={handleCreateFile}
+        onRenameFile={handleRenameFile}
+        onDeleteFile={handleDeleteFile}
       />
 
       {/* Center: Monaco Editor (flex-1) */}
-      <EditorPanel
-        activeFile={activeFile}
-        onContentChange={handleContentChange}
-      />
+      {activeFile ? (
+        <EditorPanel
+          activeFile={activeFile}
+          onContentChange={handleContentChange}
+        />
+      ) : (
+        <main className="flex-1 flex items-center justify-center bg-slate-950 text-slate-600 text-sm select-none">
+          No files open — create a new file to start.
+        </main>
+      )}
 
       {/* Right: Output Panel (350px) */}
       <OutputPanel
         logs={logs}
-        activeFileName={activeFileName}
+        activeFileName={activeFile?.name ?? ''}
         isRunning={isRunning}
         activeTab={activeTab}
         onTabChange={setActiveTab}
